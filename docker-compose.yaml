@@ -1,0 +1,111 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:latest
+    container_name: mysql
+    
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: airflow_db
+      MYSQL_USER: airflow_user
+      MYSQL_PASSWORD: airflow_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: always
+  redis:
+    image: redis:latest
+    container_name: redis_airflow
+    restart: always
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:13
+    container_name: postgres_airflow
+    restart: always
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  airflow-webserver:
+    image: apache/airflow:2.10.4
+    container_name: airflow_webserver
+    restart: always
+    depends_on:
+      - postgres
+      - redis
+      - mysql
+    environment:
+      AIRFLOW_CONN_MYSQL_DEFAULT=mysql: //airflow_user:airflow_pass@mysql:3306/airflow_db
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow 
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CORE__FERNET_KEY: 'tzKAQ_DIhyEtVkdQXJSVxZl4rc9Hv2F7LPIQ1TzzD7w='
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./config:/opt/airflow/config
+      - ./plugins:/opt/airflow/plugins
+    ports:
+      - "8080:8080"
+    command: >
+      bash -c "
+      airflow db init && 
+      airflow users create --username admin --password admin --role Admin --email admin@example.com --firstname Admin --lastname User && 
+      airflow webserver"
+
+  airflow-scheduler:
+    image: apache/airflow:2.10.4
+    container_name: airflow_scheduler
+    restart: always
+    depends_on:
+      - airflow-webserver
+    environment:
+      AIRFLOW_CONN_MYSQL_DEFAULT=mysql: //airflow_user:airflow_pass@mysql:3306/airflow_db
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./config:/opt/airflow/config
+      - ./plugins:/opt/airflow/plugins
+    command: scheduler
+
+  airflow-worker:
+    image: apache/airflow:2.10.4
+    container_name: airflow_worker
+    restart: always
+    depends_on:
+      - airflow-scheduler
+    environment:
+      AIRFLOW_CONN_MYSQL_DEFAULT=mysql: //airflow_user:airflow_pass@mysql:3306/airflow_db
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./config:/opt/airflow/config
+      - ./plugins:/opt/airflow/plugins
+    command: celery worker
+
+volumes:
+  mysql_data:
+    driver: local
+  postgres_data:
+    driver: local
